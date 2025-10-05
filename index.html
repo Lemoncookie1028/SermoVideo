@@ -18,6 +18,7 @@
   <div class="controls">
     <button id="startRandom">Start Random Chat</button>
     <button id="skipBtn">Skip Partner</button>
+    <div id="status">Not connected</div>
   </div>
 
   <video id="myVideo" autoplay muted playsinline></video>
@@ -124,6 +125,30 @@
 
     document.getElementById('startRandom').onclick = startRandomChat;
     document.getElementById('skipBtn').onclick = skipPartner;
+    const statusDiv = document.getElementById('status');
+
+function setStatus(text) {
+  statusDiv.textContent = text;
+}
+
+// In startRandomChat(), after adding self to waiting list
+setStatus('Searching for a partner...');
+
+// When a call connects:
+currentCall = peer.call(partnerId, myStream);
+currentCall.on('stream', remoteStream => {
+  partnerVideo.srcObject = remoteStream;
+  setStatus('Connected!');
+});
+
+// In call.on('close'), when partner disconnects
+currentCall.on('close', () => {
+  partnerVideo.srcObject = null;
+  currentCall = null;
+  setStatus('Searching for a partner...');
+  startRandomChat();
+});
+
   </script>
 </body>
 </html>
