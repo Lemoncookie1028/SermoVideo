@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SermoVideo</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #121212; color: #fff; text-align: center; margin: 0; padding: 20px; }
+    h1 { color: #00bcd4; }
+    video { width: 45%; background: #000; margin: 10px; border-radius: 8px; }
+    .controls { margin: 15px; }
+    button { padding: 10px 20px; margin: 5px; border: none; border-radius: 6px; background: #00bcd4; color: white; cursor: pointer; }
+    button:hover { background: #0097a7; }
+    input { padding: 8px; border-radius: 6px; border: none; margin: 5px; }
+    #idDisplay { margin: 10px 0; color: #ccc; }
+  </style>
+</head>
+<body>
+  <h1>SermoVideo</h1>
+  <div class="controls">
+    <button id="startManual">Start Manual Chat</button>
+    <input type="text" id="partnerId" placeholder="Enter Partner ID">
+    <button id="callBtn">Call Partner</button>
+    <br>
+    <button id="startRandom">Start Random Chat</button>
+  </div>
+  <div id="idDisplay">Your ID: <span id="myId">...</span></div>
+  <video id="myVideo" autoplay muted playsinline></video>
+  <video id="partnerVideo" autoplay playsinline></video>
+
+  <!-- PeerJS -->
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
+
+  <script>
+    // === Firebase Config (replace with your project keys) ===
+    const firebaseConfig = {
+       apiKey: "AIzaSyAbpd6uFQXYPD3Vfwkdq_ciS59na8xEAw0",
+       authDomain: "sermovideo-link.firebaseapp.com",
+       projectId: "sermovideo-link",
+       storageBucket: "sermovideo-link.firebasestorage.app",
+       messagingSenderId: "799514081881",
+       appId: "1:799514081881:web:47990bdfef2c5460030f48",
+       measurementId: "G-9HLVQ3B1QD"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    // === PeerJS Setup ===
+    const peer = new Peer();
+    const myVideo = document.getElementById('myVideo');
+    const partnerVideo = document.getElementById('partnerVideo');
+    const myIdSpan = document.getElementById('myId');
+    let myStream;
+
+    peer.on('open', id => {
+      myIdSpan.textContent = id;
+    });
+
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(stream => {
+      myStream = stream;
+      myVideo.srcObject = stream;
+    });
+
+    peer.on('call', call => {
+      call.answer(myStream);
+      call.on('stream', remoteStream => {
+        partnerVideo.srcObject = remoteStream;
+      });
+    });
+
+    // === Manual Mode ===
+    document.getElementById('callBtn').onclick = () => {
+      const partnerId = document.getElementById('partnerId').value;
+      const call = peer.call(partnerId, myStream);
+      call.on('stream', remoteStream => {
+        partnerVideo.srcObject = remoteStream;
+      });
+    };
+
+    // === Random Mode with Firebase ===
+    document.getElementById('startRandom').onclick = () => {
+      const waitingRef = db.ref('sermovideo_waiting');
+      const pairRef = db.ref('sermovideo_pairs');
+
+      waitingRef.once('value').then(snapshot => {
+        const waitingId = snapshot.val();
+        if (waitingId && waitingId !== peer.id) {
+          // Found a waiting user -> pair them
+          waitingRef.set(null);
+          const roomId = peer.id + '_' + waitingId;
+          pairRef.child(roomId).set({ user1: peer.id, user2: waitingId });
+
+          const call = peer.call(waitingId, myStream);
+          call.on('stream', remoteStream => {
+            partnerVideo.srcObject = remoteStream;
+          });
+        } else {
+          // No one waiting -> set myself as waiting
+          waitingRef.set(peer.id);
+          pairRef.on('child_added', snapshot => {
+            const data = snapshot.val();
+            if (data.user2 === peer.id) {
+              const call = peer.call(data.user1, myStream);
+              call.on('stream', remoteStream => {
+                partnerVideo.srcObject = remoteStream;
+              });
+            }
+          });
+        }
+      });
+    };
+  </script>
+</body>
+</html>
