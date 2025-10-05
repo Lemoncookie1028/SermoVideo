@@ -66,33 +66,52 @@
     });
 
     function startRandomChat() {
-      waitingRef.once('value').then(snapshot => {
-        const waitingId = snapshot.val();
-        if (waitingId && waitingId !== peer.id) {
-          // Pair with waiting user
-          waitingRef.set(null);
-          const roomId = peer.id + '_' + waitingId;
-          pairRef.child(roomId).set({ user1: peer.id, user2: waitingId });
+  const waitingListRef = db.ref('sermovideo_waiting');
 
-          currentCall = peer.call(waitingId, myStream);
+  // Add yourself to the waiting list
+  const myRef = waitingListRef.push(peer.id);
+
+  // Look for someone else waiting
+  waitingListRef.once('value').then(snapshot => {
+    const waitingIds = Object.values(snapshot.val() || {}).filter(id => id !== peer.id);
+
+    if (waitingIds.length > 0) {
+      // Pick a random waiting user
+      const randomIndex = Math.floor(Math.random() * waitingIds.length);
+      const partnerId = waitingIds[randomIndex];
+
+      // Remove both from waiting
+      waitingListRef.orderByValue().equalTo(peer.id).once('value', s => {
+        s.forEach(child => child.ref.remove());
+      });
+      waitingListRef.orderByValue().equalTo(partnerId).once('value', s => {
+        s.forEach(child => child.ref.remove());
+      });
+
+      // Create a pair
+      const roomId = peer.id + '_' + partnerId;
+      pairRef.child(roomId).set({ user1: peer.id, user2: partnerId });
+
+      // Call the partner
+      currentCall = peer.call(partnerId, myStream);
+      currentCall.on('stream', remoteStream => {
+        partnerVideo.srcObject = remoteStream;
+      });
+    } else {
+      // Wait for someone else to join
+      pairRef.on('child_added', snapshot => {
+        const data = snapshot.val();
+        if (data.user2 === peer.id) {
+          currentCall = peer.call(data.user1, myStream);
           currentCall.on('stream', remoteStream => {
             partnerVideo.srcObject = remoteStream;
-          });
-        } else {
-          // Set myself as waiting
-          waitingRef.set(peer.id);
-          pairRef.on('child_added', snapshot => {
-            const data = snapshot.val();
-            if (data.user2 === peer.id) {
-              currentCall = peer.call(data.user1, myStream);
-              currentCall.on('stream', remoteStream => {
-                partnerVideo.srcObject = remoteStream;
-              });
-            }
           });
         }
       });
     }
+  });
+}
+
 
     function skipPartner() {
       if (currentCall) {
