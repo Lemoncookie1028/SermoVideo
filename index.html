@@ -50,8 +50,9 @@
     const partnerVideo = document.getElementById('partnerVideo');
     let myStream;
     let currentCall = null;
-    let waitingRef = db.ref('sermovideo_waiting');
-    let pairRef = db.ref('sermovideo_pairs');
+    let myWaitingRef = null;
+    const waitingRef = db.ref('sermovideo_waiting');
+    const pairRef = db.ref('sermovideo_pairs');
 
     navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(stream => {
       myStream = stream;
@@ -67,52 +68,48 @@
     });
 
     function startRandomChat() {
-  const waitingListRef = db.ref('sermovideo_waiting');
+      if (!myStream) return;
 
-  // Add yourself to the waiting list
-  const myRef = waitingListRef.push(peer.id);
+      // Add self to waiting list
+      myWaitingRef = waitingRef.push(peer.id);
 
-  // Look for someone else waiting
-  waitingListRef.once('value').then(snapshot => {
-    const waitingIds = Object.values(snapshot.val() || {}).filter(id => id !== peer.id);
+      // Check for other waiting users
+      waitingRef.once('value').then(snapshot => {
+        const waitingData = snapshot.val() || {};
+        const waitingIds = Object.values(waitingData).filter(id => id !== peer.id);
 
-    if (waitingIds.length > 0) {
-      // Pick a random waiting user
-      const randomIndex = Math.floor(Math.random() * waitingIds.length);
-      const partnerId = waitingIds[randomIndex];
+        if (waitingIds.length > 0) {
+          // Pick a random waiting user
+          const partnerId = waitingIds[Math.floor(Math.random() * waitingIds.length)];
 
-      // Remove both from waiting
-      waitingListRef.orderByValue().equalTo(peer.id).once('value', s => {
-        s.forEach(child => child.ref.remove());
-      });
-      waitingListRef.orderByValue().equalTo(partnerId).once('value', s => {
-        s.forEach(child => child.ref.remove());
-      });
+          // Remove both users from waiting
+          Object.entries(waitingData).forEach(([key, id]) => {
+            if (id === peer.id || id === partnerId) waitingRef.child(key).remove();
+          });
 
-      // Create a pair
-      const roomId = peer.id + '_' + partnerId;
-      pairRef.child(roomId).set({ user1: peer.id, user2: partnerId });
+          // Create pair
+          const roomId = peer.id + '_' + partnerId;
+          pairRef.child(roomId).set({ user1: peer.id, user2: partnerId });
 
-      // Call the partner
-      currentCall = peer.call(partnerId, myStream);
-      currentCall.on('stream', remoteStream => {
-        partnerVideo.srcObject = remoteStream;
-      });
-    } else {
-      // Wait for someone else to join
-      pairRef.on('child_added', snapshot => {
-        const data = snapshot.val();
-        if (data.user2 === peer.id) {
-          currentCall = peer.call(data.user1, myStream);
+          // Call partner
+          currentCall = peer.call(partnerId, myStream);
           currentCall.on('stream', remoteStream => {
             partnerVideo.srcObject = remoteStream;
+          });
+        } else {
+          // Wait for someone to pair with you
+          pairRef.on('child_added', snapshot => {
+            const data = snapshot.val();
+            if (data.user2 === peer.id) {
+              currentCall = peer.call(data.user1, myStream);
+              currentCall.on('stream', remoteStream => {
+                partnerVideo.srcObject = remoteStream;
+              });
+            }
           });
         }
       });
     }
-  });
-}
-
 
     function skipPartner() {
       if (currentCall) {
@@ -120,6 +117,8 @@
         partnerVideo.srcObject = null;
         currentCall = null;
       }
+      // Remove self from waiting if present
+      if (myWaitingRef) myWaitingRef.remove();
       startRandomChat();
     }
 
