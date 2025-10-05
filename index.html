@@ -18,6 +18,7 @@
   <div class="controls">
     <button id="startRandom">Start Random Chat</button>
     <button id="skipBtn">Skip Partner</button>
+    <button id="toggleSearchBtn">Stop Searching</button>
     <div id="status">Not connected</div>
   </div>
 
@@ -148,6 +149,100 @@ currentCall.on('close', () => {
   setStatus('Searching for a partner...');
   startRandomChat();
 });
+let searching = false;
+
+function setStatus(text) {
+  statusDiv.textContent = text;
+}
+
+function startRandomChat() {
+  if (!myStream || !searching) return;
+
+  setStatus('Searching for a partner...');
+
+  // Remove self from waiting if present
+  if (myWaitingRef) myWaitingRef.remove();
+
+  // Add self to waiting list
+  myWaitingRef = waitingRef.push(peer.id);
+
+  // Look for another waiting user
+  waitingRef.once('value').then(snapshot => {
+    if (!searching) return; // stop if searching turned off
+    const waitingData = snapshot.val() || {};
+    const waitingIds = Object.values(waitingData).filter(id => id !== peer.id);
+
+    if (waitingIds.length > 0) {
+      const partnerId = waitingIds[Math.floor(Math.random() * waitingIds.length)];
+
+      // Remove both from waiting
+      Object.entries(waitingData).forEach(([key, id]) => {
+        if (id === peer.id || id === partnerId) waitingRef.child(key).remove();
+      });
+
+      const roomId = peer.id + '_' + partnerId;
+      pairRef.child(roomId).set({ user1: peer.id, user2: partnerId });
+
+      currentCall = peer.call(partnerId, myStream);
+      currentCall.on('stream', remoteStream => {
+        partnerVideo.srcObject = remoteStream;
+        setStatus('Connected!');
+      });
+
+      currentCall.on('close', () => {
+        partnerVideo.srcObject = null;
+        currentCall = null;
+        if (searching) startRandomChat();
+      });
+    } else {
+      pairRef.on('child_added', snapshot => {
+        const data = snapshot.val();
+        if (data.user2 === peer.id && !currentCall && searching) {
+          currentCall = peer.call(data.user1, myStream);
+          currentCall.on('stream', remoteStream => {
+            partnerVideo.srcObject = remoteStream;
+            setStatus('Connected!');
+          });
+          currentCall.on('close', () => {
+            partnerVideo.srcObject = null;
+            currentCall = null;
+            if (searching) startRandomChat();
+          });
+        }
+      });
+    }
+  });
+}
+
+// Toggle searching
+document.getElementById('toggleSearchBtn').onclick = () => {
+  searching = !searching;
+  const btn = document.getElementById('toggleSearchBtn');
+  btn.textContent = searching ? 'Stop Searching' : 'Start Searching';
+  if (searching) startRandomChat();
+  else {
+    setStatus('Searching paused');
+    if (myWaitingRef) myWaitingRef.remove();
+  }
+};
+
+// Start button now only enables searching
+document.getElementById('startRandom').onclick = () => {
+  searching = true;
+  document.getElementById('toggleSearchBtn').textContent = 'Stop Searching';
+  startRandomChat();
+};
+
+// Skip button still works
+document.getElementById('skipBtn').onclick = () => {
+  if (currentCall) {
+    currentCall.close();
+    partnerVideo.srcObject = null;
+    currentCall = null;
+  }
+  if (searching) startRandomChat();
+};
+
 
   </script>
 </body>
