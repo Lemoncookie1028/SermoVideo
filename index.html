@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="favicon.ico" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SermoVideo</title>
 <style>
@@ -12,10 +13,48 @@ video { width: 45%; background: #000; margin: 10px; border-radius: 8px; }
 button { padding: 10px 20px; margin: 5px; border: none; border-radius: 6px; background: #00bcd4; color: white; cursor: pointer; }
 button:hover { background: #0097a7; }
 #status { margin-top: 10px; color: #ccc; }
+.camera-switch {
+  margin: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #1e1e1e;
+  padding: 8px 12px;
+  border-radius: 6px;
+  box-shadow: 0 0 6px rgba(0,188,212,0.4);
+}
+
+.camera-switch label {
+  color: #00bcd4;
+  font-weight: bold;
+  font-size: 14px;
+}
+
+#cameraSelect {
+  background: #121212;
+  border: 1px solid #00bcd4;
+  color: white;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  outline: none;
+  transition: all 0.2s ease-in-out;
+}
+
+#cameraSelect:hover {
+  border-color: #0097a7;
+  box-shadow: 0 0 5px #0097a7;
+}
 </style>
 </head>
 <body>
 <h1>SermoVideo</h1>
+<div class="camera-switch">
+  <label for="cameraSelect">🎥 Camera:</label>
+  <select id="cameraSelect"></select>
+</div>
+
 <div class="controls">
   <button id="startRandom">Start Random Chat</button>
   <button id="skipBtn">Skip Partner</button>
@@ -59,6 +98,8 @@ const waitingRef = db.ref('sermovideo_waiting');
 const pairRef = db.ref('sermovideo_pairs');
 const statusDiv = document.getElementById('status');
 
+let pairListener = null;
+
 function setStatus(text) { statusDiv.textContent = text; }
 
 // Get camera & mic
@@ -69,6 +110,7 @@ navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(stream =>
 
 // Handle incoming calls
 peer.on('call', call => {
+  cleanupCall();
   currentCall = call;
   call.answer(myStream);
   call.on('stream', remoteStream => {
@@ -76,20 +118,37 @@ peer.on('call', call => {
     setStatus('Connected!');
   });
   call.on('close', () => {
-    partnerVideo.srcObject = null;
-    currentCall = null;
+    cleanupCall();
     if (searching) startRandomChat();
   });
 });
+
+function cleanupCall() {
+  if (currentCall) {
+    currentCall.close();
+    currentCall = null;
+  }
+  partnerVideo.srcObject = null;
+}
+
+// Remove listeners + waiting entry
+function cleanupWaiting() {
+  if (myWaitingRef) {
+    myWaitingRef.remove();
+    myWaitingRef = null;
+  }
+  if (pairListener) {
+    pairRef.off('child_added', pairListener);
+    pairListener = null;
+  }
+}
 
 // Main random chat function
 function startRandomChat() {
   if (!myStream || !searching) return;
 
   setStatus('Searching for a partner...');
-
-  // Remove self from waiting if present
-  if (myWaitingRef) myWaitingRef.remove();
+  cleanupWaiting();
 
   // Add self to waiting
   myWaitingRef = waitingRef.push(peer.id);
@@ -100,7 +159,6 @@ function startRandomChat() {
     const waitingIds = Object.values(waitingData).filter(id => id !== peer.id);
 
     if (waitingIds.length > 0) {
-      // Pick random partner
       const partnerId = waitingIds[Math.floor(Math.random() * waitingIds.length)];
 
       // Remove both from waiting
@@ -108,33 +166,33 @@ function startRandomChat() {
         if (id === peer.id || id === partnerId) waitingRef.child(key).remove();
       });
 
-      // Create pair
       const roomId = peer.id + '_' + partnerId;
       pairRef.child(roomId).set({ user1: peer.id, user2: partnerId });
 
+      cleanupCall();
       currentCall = peer.call(partnerId, myStream);
       currentCall.on('stream', remoteStream => {
         partnerVideo.srcObject = remoteStream;
         setStatus('Connected!');
       });
       currentCall.on('close', () => {
-        partnerVideo.srcObject = null;
-        currentCall = null;
+        cleanupCall();
         if (searching) startRandomChat();
       });
+
     } else {
-      // Wait for incoming pairing
-      pairRef.on('child_added', snapshot => {
+      // Wait for pairing
+      pairListener = pairRef.on('child_added', snapshot => {
         const data = snapshot.val();
         if (data.user2 === peer.id && !currentCall && searching) {
+          cleanupCall();
           currentCall = peer.call(data.user1, myStream);
           currentCall.on('stream', remoteStream => {
             partnerVideo.srcObject = remoteStream;
             setStatus('Connected!');
           });
           currentCall.on('close', () => {
-            partnerVideo.srcObject = null;
-            currentCall = null;
+            cleanupCall();
             if (searching) startRandomChat();
           });
         }
@@ -145,9 +203,7 @@ function startRandomChat() {
 
 // Skip button
 document.getElementById('skipBtn').onclick = () => {
-  if (currentCall) currentCall.close();
-  partnerVideo.srcObject = null;
-  currentCall = null;
+  cleanupCall();
   if (searching) startRandomChat();
 };
 
@@ -159,7 +215,8 @@ document.getElementById('toggleSearchBtn').onclick = () => {
   if (searching) startRandomChat();
   else {
     setStatus('Searching paused');
-    if (myWaitingRef) myWaitingRef.remove();
+    cleanupWaiting();
+    cleanupCall();
   }
 };
 
@@ -169,6 +226,54 @@ document.getElementById('startRandom').onclick = () => {
   document.getElementById('toggleSearchBtn').textContent = 'Stop Searching';
   startRandomChat();
 };
+const cameraSelect = document.getElementById("cameraSelect");
+
+async function getCameras() {
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const videoDevices = devices.filter(d => d.kind === "videoinput");
+
+  cameraSelect.innerHTML = "";
+  videoDevices.forEach((device, index) => {
+    const option = document.createElement("option");
+    option.value = device.deviceId;
+    option.text = device.label || `Camera ${index + 1}`;
+    cameraSelect.appendChild(option);
+  });
+}
+
+async function startCamera(deviceId) {
+  if (myStream) {
+    myStream.getTracks().forEach(track => track.stop());
+  }
+
+  myStream = await navigator.mediaDevices.getUserMedia({
+    video: { deviceId: deviceId ? { exact: deviceId } : undefined },
+    audio: true
+  });
+
+  myVideo.srcObject = myStream;
+
+  // Update PeerJS stream if in a call
+  if (currentCall) {
+    const videoTrack = myStream.getVideoTracks()[0];
+    const sender = currentCall.peerConnection.getSenders().find(s => s.track && s.track.kind === "video");
+    if (sender) {
+      sender.replaceTrack(videoTrack);
+    }
+  }
+}
+
+cameraSelect.addEventListener("change", () => {
+  startCamera(cameraSelect.value);
+});
+
+// Load cameras on start
+getCameras().then(() => {
+  if (cameraSelect.options.length > 0) {
+    startCamera(cameraSelect.value);
+  }
+});
+
 </script>
 </body>
 </html>
