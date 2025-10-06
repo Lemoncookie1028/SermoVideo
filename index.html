@@ -46,13 +46,102 @@ button:hover { background: #0097a7; }
   border-color: #0097a7;
   box-shadow: 0 0 5px #0097a7;
 }
+.camera-panel {
+  margin: 20px auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: #1e1e1e;
+  padding: 10px 16px;
+  border-radius: 12px;
+  box-shadow: 0 0 12px rgba(0,188,212,0.4);
+  border: 1px solid #00bcd4;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.camera-panel:hover {
+  transform: scale(1.05);
+  box-shadow: 0 0 15px rgba(0,188,212,0.7);
+}
+
+.camera-panel label {
+  color: #00bcd4;
+  font-weight: bold;
+  font-size: 14px;
+}
+
+#cameraSelect {
+  background: #121212;
+  border: 1px solid #00bcd4;
+  color: white;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  outline: none;
+  transition: all 0.2s ease-in-out;
+}
+
+#cameraSelect:hover {
+  border-color: #0097a7;
+  box-shadow: 0 0 6px #0097a7;
+}
+
+.media-panel {
+  margin: 20px auto;
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+  background: #1e1e1e;
+  padding: 12px 20px;
+  border-radius: 14px;
+  box-shadow: 0 0 12px rgba(0,188,212,0.4);
+  border: 1px solid #00bcd4;
+  flex-wrap: wrap;
+}
+
+.media-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.media-control label {
+  color: #00bcd4;
+  font-weight: bold;
+  font-size: 14px;
+}
+
+.media-control select {
+  background: #121212;
+  border: 1px solid #00bcd4;
+  color: white;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  outline: none;
+  transition: all 0.2s ease-in-out;
+}
+
+.media-control select:hover {
+  border-color: #0097a7;
+  box-shadow: 0 0 6px #0097a7;
+}
+
 </style>
 </head>
 <body>
 <h1>SermoVideo</h1>
-<div class="camera-switch">
-  <label for="cameraSelect">🎥 Camera:</label>
-  <select id="cameraSelect"></select>
+<div class="media-panel">
+  <div class="media-control">
+    <label for="cameraSelect">🎥 Camera:</label>
+    <select id="cameraSelect"></select>
+  </div>
+  <div class="media-control">
+    <label for="micSelect">🎤 Microphone:</label>
+    <select id="micSelect"></select>
+  </div>
 </div>
 
 <div class="controls">
@@ -227,11 +316,14 @@ document.getElementById('startRandom').onclick = () => {
   startRandomChat();
 };
 const cameraSelect = document.getElementById("cameraSelect");
+const micSelect = document.getElementById("micSelect");
 
-async function getCameras() {
+async function getDevices() {
   const devices = await navigator.mediaDevices.enumerateDevices();
   const videoDevices = devices.filter(d => d.kind === "videoinput");
+  const audioDevices = devices.filter(d => d.kind === "audioinput");
 
+  // Populate cameras
   cameraSelect.innerHTML = "";
   videoDevices.forEach((device, index) => {
     const option = document.createElement("option");
@@ -239,40 +331,57 @@ async function getCameras() {
     option.text = device.label || `Camera ${index + 1}`;
     cameraSelect.appendChild(option);
   });
+
+  // Populate microphones
+  micSelect.innerHTML = "";
+  audioDevices.forEach((device, index) => {
+    const option = document.createElement("option");
+    option.value = device.deviceId;
+    option.text = device.label || `Microphone ${index + 1}`;
+    micSelect.appendChild(option);
+  });
 }
 
-async function startCamera(deviceId) {
+async function startMedia(cameraId, micId) {
   if (myStream) {
     myStream.getTracks().forEach(track => track.stop());
   }
 
   myStream = await navigator.mediaDevices.getUserMedia({
-    video: { deviceId: deviceId ? { exact: deviceId } : undefined },
-    audio: true
+    video: cameraId ? { deviceId: { exact: cameraId } } : true,
+    audio: micId ? { deviceId: { exact: micId } } : true
   });
 
   myVideo.srcObject = myStream;
 
-  // Update PeerJS stream if in a call
+  // Update PeerJS stream with new tracks
   if (currentCall) {
-    const videoTrack = myStream.getVideoTracks()[0];
-    const sender = currentCall.peerConnection.getSenders().find(s => s.track && s.track.kind === "video");
-    if (sender) {
-      sender.replaceTrack(videoTrack);
-    }
+    myStream.getTracks().forEach(track => {
+      const sender = currentCall.peerConnection.getSenders().find(s => s.track && s.track.kind === track.kind);
+      if (sender) {
+        sender.replaceTrack(track);
+      }
+    });
   }
 }
 
+// Camera change
 cameraSelect.addEventListener("change", () => {
-  startCamera(cameraSelect.value);
+  startMedia(cameraSelect.value, micSelect.value);
 });
 
-// Load cameras on start
-getCameras().then(() => {
-  if (cameraSelect.options.length > 0) {
-    startCamera(cameraSelect.value);
+// Mic change
+micSelect.addEventListener("change", () => {
+  startMedia(cameraSelect.value, micSelect.value);
+});
+
+// Load available devices on startup
+getDevices().then(() => {
+  if (cameraSelect.options.length > 0 || micSelect.options.length > 0) {
+    startMedia(cameraSelect.value, micSelect.value);
   }
 });
+
 
 </script>
 </body>
