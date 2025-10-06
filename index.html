@@ -13,79 +13,6 @@ video { width: 45%; background: #000; margin: 10px; border-radius: 8px; }
 button { padding: 10px 20px; margin: 5px; border: none; border-radius: 6px; background: #00bcd4; color: white; cursor: pointer; }
 button:hover { background: #0097a7; }
 #status { margin-top: 10px; color: #ccc; }
-.camera-switch {
-  margin: 10px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  background: #1e1e1e;
-  padding: 8px 12px;
-  border-radius: 6px;
-  box-shadow: 0 0 6px rgba(0,188,212,0.4);
-}
-
-.camera-switch label {
-  color: #00bcd4;
-  font-weight: bold;
-  font-size: 14px;
-}
-
-#cameraSelect {
-  background: #121212;
-  border: 1px solid #00bcd4;
-  color: white;
-  padding: 6px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
-  outline: none;
-  transition: all 0.2s ease-in-out;
-}
-
-#cameraSelect:hover {
-  border-color: #0097a7;
-  box-shadow: 0 0 5px #0097a7;
-}
-.camera-panel {
-  margin: 20px auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  background: #1e1e1e;
-  padding: 10px 16px;
-  border-radius: 12px;
-  box-shadow: 0 0 12px rgba(0,188,212,0.4);
-  border: 1px solid #00bcd4;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.camera-panel:hover {
-  transform: scale(1.05);
-  box-shadow: 0 0 15px rgba(0,188,212,0.7);
-}
-
-.camera-panel label {
-  color: #00bcd4;
-  font-weight: bold;
-  font-size: 14px;
-}
-
-#cameraSelect {
-  background: #121212;
-  border: 1px solid #00bcd4;
-  color: white;
-  padding: 6px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 14px;
-  outline: none;
-  transition: all 0.2s ease-in-out;
-}
-
-#cameraSelect:hover {
-  border-color: #0097a7;
-  box-shadow: 0 0 6px #0097a7;
-}
 
 .media-panel {
   margin: 20px auto;
@@ -129,10 +56,57 @@ button:hover { background: #0097a7; }
   box-shadow: 0 0 6px #0097a7;
 }
 
+/* Call bar with arrow toggle */
+.call-bar {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(18, 18, 18, 0.9);
+  border: 1px solid #00bcd4;
+  border-radius: 15px;
+  padding: 10px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 0 15px rgba(0,188,212,0.4);
+  z-index: 1000;
+  opacity: 1;
+  transition: opacity 0.5s ease;
+}
+.call-bar.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.arrow-toggle {
+  background: #1e1e1e;
+  border: 1px solid #00bcd4;
+  color: #00bcd4;
+  font-size: 16px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+}
+.arrow-toggle:hover {
+  background: #00bcd4;
+  color: white;
+  box-shadow: 0 0 6px rgba(0,188,212,0.6);
+}
+
+.call-controls {
+  display: flex;
+  gap: 15px;
+  justify-content: center;
+  align-items: center;
+}
 </style>
 </head>
 <body>
 <h1>SermoVideo</h1>
+
 <div class="media-panel">
   <div class="media-control">
     <label for="cameraSelect">🎥 Camera:</label>
@@ -144,10 +118,18 @@ button:hover { background: #0097a7; }
   </div>
 </div>
 
+<div class="call-bar" id="callBar">
+  <button class="arrow-toggle" id="toggleArrow">▼</button>
+  <div class="call-controls">
+    <button id="muteBtn">🔇 Mute</button>
+    <button id="cameraBtn">📷 Pause Camera</button>
+    <button id="skipBtn">⏭ Skip</button>
+    <button id="toggleSearchBtn">🔄 Stop Searching</button>
+  </div>
+</div>
+
 <div class="controls">
   <button id="startRandom">Start Random Chat</button>
-  <button id="skipBtn">Skip Partner</button>
-  <button id="toggleSearchBtn">Stop Searching</button>
   <div id="status">Not connected</div>
 </div>
 
@@ -220,7 +202,6 @@ function cleanupCall() {
   partnerVideo.srcObject = null;
 }
 
-// Remove listeners + waiting entry
 function cleanupWaiting() {
   if (myWaitingRef) {
     myWaitingRef.remove();
@@ -232,14 +213,12 @@ function cleanupWaiting() {
   }
 }
 
-// Main random chat function
+// Random chat
 function startRandomChat() {
   if (!myStream || !searching) return;
-
   setStatus('Searching for a partner...');
   cleanupWaiting();
 
-  // Add self to waiting
   myWaitingRef = waitingRef.push(peer.id);
 
   waitingRef.once('value').then(snapshot => {
@@ -249,12 +228,9 @@ function startRandomChat() {
 
     if (waitingIds.length > 0) {
       const partnerId = waitingIds[Math.floor(Math.random() * waitingIds.length)];
-
-      // Remove both from waiting
       Object.entries(waitingData).forEach(([key, id]) => {
         if (id === peer.id || id === partnerId) waitingRef.child(key).remove();
       });
-
       const roomId = peer.id + '_' + partnerId;
       pairRef.child(roomId).set({ user1: peer.id, user2: partnerId });
 
@@ -270,7 +246,6 @@ function startRandomChat() {
       });
 
     } else {
-      // Wait for pairing
       pairListener = pairRef.on('child_added', snapshot => {
         const data = snapshot.val();
         if (data.user2 === peer.id && !currentCall && searching) {
@@ -290,13 +265,11 @@ function startRandomChat() {
   });
 }
 
-// Skip button
+// Buttons
 document.getElementById('skipBtn').onclick = () => {
   cleanupCall();
   if (searching) startRandomChat();
 };
-
-// Toggle searching
 document.getElementById('toggleSearchBtn').onclick = () => {
   searching = !searching;
   const btn = document.getElementById('toggleSearchBtn');
@@ -308,13 +281,13 @@ document.getElementById('toggleSearchBtn').onclick = () => {
     cleanupCall();
   }
 };
-
-// Start button
 document.getElementById('startRandom').onclick = () => {
   searching = true;
   document.getElementById('toggleSearchBtn').textContent = 'Stop Searching';
   startRandomChat();
 };
+
+// Devices
 const cameraSelect = document.getElementById("cameraSelect");
 const micSelect = document.getElementById("micSelect");
 
@@ -323,7 +296,6 @@ async function getDevices() {
   const videoDevices = devices.filter(d => d.kind === "videoinput");
   const audioDevices = devices.filter(d => d.kind === "audioinput");
 
-  // Populate cameras
   cameraSelect.innerHTML = "";
   videoDevices.forEach((device, index) => {
     const option = document.createElement("option");
@@ -332,7 +304,6 @@ async function getDevices() {
     cameraSelect.appendChild(option);
   });
 
-  // Populate microphones
   micSelect.innerHTML = "";
   audioDevices.forEach((device, index) => {
     const option = document.createElement("option");
@@ -343,46 +314,77 @@ async function getDevices() {
 }
 
 async function startMedia(cameraId, micId) {
-  if (myStream) {
-    myStream.getTracks().forEach(track => track.stop());
-  }
+  if (myStream) myStream.getTracks().forEach(track => track.stop());
 
   myStream = await navigator.mediaDevices.getUserMedia({
     video: cameraId ? { deviceId: { exact: cameraId } } : true,
     audio: micId ? { deviceId: { exact: micId } } : true
   });
-
   myVideo.srcObject = myStream;
 
-  // Update PeerJS stream with new tracks
   if (currentCall) {
     myStream.getTracks().forEach(track => {
       const sender = currentCall.peerConnection.getSenders().find(s => s.track && s.track.kind === track.kind);
-      if (sender) {
-        sender.replaceTrack(track);
-      }
+      if (sender) sender.replaceTrack(track);
     });
   }
 }
 
-// Camera change
-cameraSelect.addEventListener("change", () => {
-  startMedia(cameraSelect.value, micSelect.value);
-});
-
-// Mic change
-micSelect.addEventListener("change", () => {
-  startMedia(cameraSelect.value, micSelect.value);
-});
-
-// Load available devices on startup
+cameraSelect.addEventListener("change", () => startMedia(cameraSelect.value, micSelect.value));
+micSelect.addEventListener("change", () => startMedia(cameraSelect.value, micSelect.value));
 getDevices().then(() => {
   if (cameraSelect.options.length > 0 || micSelect.options.length > 0) {
     startMedia(cameraSelect.value, micSelect.value);
   }
 });
 
+// Mute & camera toggle
+const muteBtn = document.getElementById("muteBtn");
+const cameraBtn = document.getElementById("cameraBtn");
+let micMuted = false;
+let camPaused = false;
 
+muteBtn.addEventListener("click", () => {
+  if (!myStream) return;
+  micMuted = !micMuted;
+  myStream.getAudioTracks().forEach(track => (track.enabled = !micMuted));
+  muteBtn.textContent = micMuted ? "🔈 Unmute" : "🔇 Mute";
+});
+
+cameraBtn.addEventListener("click", () => {
+  if (!myStream) return;
+  camPaused = !camPaused;
+  myStream.getVideoTracks().forEach(track => (track.enabled = !camPaused));
+  cameraBtn.textContent = camPaused ? "📷 Resume Camera" : "📷 Pause Camera";
+});
+
+// Call bar toggle
+const callBar = document.getElementById('callBar');
+const toggleArrow = document.getElementById('toggleArrow');
+let hideTimeout;
+
+function showCallBar() {
+  callBar.classList.remove('hidden');
+  clearTimeout(hideTimeout);
+  hideTimeout = setTimeout(() => {
+    callBar.classList.add('hidden');
+  }, 3000);
+}
+document.addEventListener('mousemove', showCallBar);
+document.addEventListener('touchstart', showCallBar);
+
+toggleArrow.addEventListener("click", () => {
+  const isHidden = callBar.classList.contains("hidden");
+  if (isHidden) {
+    callBar.classList.remove("hidden");
+    toggleArrow.textContent = "▼";
+  } else {
+    callBar.classList.add("hidden");
+    toggleArrow.textContent = "▲";
+  }
+});
+
+callBar.classList.add('hidden');
 </script>
 </body>
 </html>
