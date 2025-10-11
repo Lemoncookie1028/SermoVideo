@@ -158,7 +158,13 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
 // === PeerJS Setup ===
-const peer = new Peer();
+const peer = new Peer({
+  host: '0.peerjs.com',
+  port: 443,
+  secure: true,
+  path: '/'
+});
+
 const myVideo = document.getElementById('myVideo');
 const partnerVideo = document.getElementById('partnerVideo');
 let myStream;
@@ -168,18 +174,17 @@ let searching = false;
 const waitingRef = db.ref('sermovideo_waiting');
 const pairRef = db.ref('sermovideo_pairs');
 const statusDiv = document.getElementById('status');
-
 let pairListener = null;
 
 function setStatus(text) { statusDiv.textContent = text; }
 
-// Get camera & mic
+// --- Core Setup ---
 navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(stream => {
   myStream = stream;
   myVideo.srcObject = stream;
 });
 
-// Handle incoming calls
+// --- Handle incoming calls ---
 peer.on('call', call => {
   cleanupCall();
   currentCall = call;
@@ -194,6 +199,7 @@ peer.on('call', call => {
   });
 });
 
+// --- Cleanups ---
 function cleanupCall() {
   if (currentCall) {
     currentCall.close();
@@ -211,9 +217,19 @@ function cleanupWaiting() {
     pairRef.off('child_added', pairListener);
     pairListener = null;
   }
+
+  // Remove any pairs with this peer ID
+  pairRef.once('value').then(snapshot => {
+    snapshot.forEach(child => {
+      const data = child.val();
+      if (data.user1 === peer.id || data.user2 === peer.id) {
+        child.ref.remove();
+      }
+    });
+  });
 }
 
-// Random chat
+// --- Random chat ---
 function startRandomChat() {
   if (!myStream || !searching) return;
   setStatus('Searching for a partner...');
@@ -231,6 +247,7 @@ function startRandomChat() {
       Object.entries(waitingData).forEach(([key, id]) => {
         if (id === peer.id || id === partnerId) waitingRef.child(key).remove();
       });
+
       const roomId = peer.id + '_' + partnerId;
       pairRef.child(roomId).set({ user1: peer.id, user2: partnerId });
 
@@ -265,11 +282,13 @@ function startRandomChat() {
   });
 }
 
-// Buttons
+// --- Buttons ---
 document.getElementById('skipBtn').onclick = () => {
   cleanupCall();
+  cleanupWaiting(); // 🔥 remove user from database
   if (searching) startRandomChat();
 };
+
 document.getElementById('toggleSearchBtn').onclick = () => {
   searching = !searching;
   const btn = document.getElementById('toggleSearchBtn');
@@ -277,15 +296,23 @@ document.getElementById('toggleSearchBtn').onclick = () => {
   if (searching) startRandomChat();
   else {
     setStatus('Searching paused');
-    cleanupWaiting();
+    cleanupWaiting(); // 🔥 cleanup database entries
     cleanupCall();
   }
 };
+
 document.getElementById('startRandom').onclick = () => {
   searching = true;
   document.getElementById('toggleSearchBtn').textContent = 'Stop Searching';
   startRandomChat();
 };
+
+// --- Remove from database when tab closes ---
+window.addEventListener('beforeunload', () => {
+  cleanupWaiting();
+});
+
+// === Devices, mute, and camera code remain unchanged below ===
 
 // Devices
 const cameraSelect = document.getElementById("cameraSelect");
