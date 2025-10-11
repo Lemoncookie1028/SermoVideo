@@ -24,8 +24,9 @@ button {
 }
 button:hover { background:#0099cc; }
 </style>
-<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js"></script>
+<!-- ✅ Use Firebase v8 scripts -->
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
 </head>
 <body>
   <h2>Private Room</h2>
@@ -38,14 +39,15 @@ button:hover { background:#0099cc; }
   </div>
 
 <script>
-// --- Firebase Config (same as index) ---
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_DOMAIN",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_BUCKET",
-  messagingSenderId: "YOUR_MSG_ID",
-  appId: "YOUR_APP_ID"
+   apiKey: "AIzaSyAbpd6uFQXYPD3Vfwkdq_ciS59na8xEAw0",
+   authDomain: "sermovideo-link.firebaseapp.com",
+   databaseURL: "https://sermovideo-link-default-rtdb.europe-west1.firebasedatabase.app",
+   projectId: "sermovideo-link",
+   storageBucket: "sermovideo-link.firebasestorage.app",
+   messagingSenderId: "799514081881",
+   appId: "1:799514081881:web:47990bdfef2c5460030f48",
+   measurementId: "G-9HLVQ3B1QD"
 };
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
@@ -96,7 +98,7 @@ document.getElementById('callBtn').onclick = async () => {
 document.getElementById('hangupBtn').onclick = async () => {
   if (peerConnection) peerConnection.close();
   localStream.getTracks().forEach(t => t.stop());
-  window.location.href = "index.html";
+  window.location.href = "private.html";
 };
 
 // --- If joining existing room ---
