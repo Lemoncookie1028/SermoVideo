@@ -27,17 +27,9 @@ button:hover { background: #0097a7; }
   flex-wrap: wrap;
 }
 
-.media-control {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
+.media-control { display: flex; align-items: center; gap: 8px; }
 
-.media-control label {
-  color: #00bcd4;
-  font-weight: bold;
-  font-size: 14px;
-}
+.media-control label { color: #00bcd4; font-weight: bold; font-size: 14px; }
 
 .media-control select {
   background: #121212;
@@ -56,7 +48,6 @@ button:hover { background: #0097a7; }
   box-shadow: 0 0 6px #0097a7;
 }
 
-/* Call bar with arrow toggle */
 .call-bar {
   position: fixed;
   bottom: 20px;
@@ -75,10 +66,7 @@ button:hover { background: #0097a7; }
   opacity: 1;
   transition: opacity 0.5s ease;
 }
-.call-bar.hidden {
-  opacity: 0;
-  pointer-events: none;
-}
+.call-bar.hidden { opacity: 0; pointer-events: none; }
 
 .arrow-toggle {
   background: #1e1e1e;
@@ -96,12 +84,7 @@ button:hover { background: #0097a7; }
   box-shadow: 0 0 6px rgba(0,188,212,0.6);
 }
 
-.call-controls {
-  display: flex;
-  gap: 15px;
-  justify-content: center;
-  align-items: center;
-}
+.call-controls { display: flex; gap: 15px; justify-content: center; align-items: center; }
 </style>
 </head>
 <body>
@@ -136,9 +119,6 @@ button:hover { background: #0097a7; }
 <video id="myVideo" autoplay muted playsinline></video>
 <video id="partnerVideo" autoplay playsinline></video>
 
-<!-- PeerJS -->
-<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
-<!-- Firebase -->
 <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
 
@@ -151,267 +131,177 @@ const firebaseConfig = {
    projectId: "sermovideo-link",
    storageBucket: "sermovideo-link.firebasestorage.app",
    messagingSenderId: "799514081881",
-   appId: "1:799514081881:web:47990bdfef2c5460030f48",
-   measurementId: "G-9HLVQ3B1QD"
+   appId: "1:799514081881:web:47990bdfef2c5460030f48"
 };
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
-// === PeerJS Setup ===
-const peer = new Peer({
-  host: '0.peerjs.com',
-  port: 443,
-  secure: true,
-  path: '/'
-});
+let myStream;
+let pc = null;
+let localId = Math.random().toString(36).substring(2, 10);
+let currentRoomRef = null;
+let searching = false;
 
 const myVideo = document.getElementById('myVideo');
 const partnerVideo = document.getElementById('partnerVideo');
-let myStream;
-let currentCall = null;
-let myWaitingRef = null;
-let searching = false;
-const waitingRef = db.ref('sermovideo_waiting');
-const pairRef = db.ref('sermovideo_pairs');
 const statusDiv = document.getElementById('status');
-let pairListener = null;
 
 function setStatus(text) { statusDiv.textContent = text; }
 
-// --- Core Setup ---
-navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(stream => {
-  myStream = stream;
-  myVideo.srcObject = stream;
-});
-
-// --- Handle incoming calls ---
-peer.on('call', call => {
-  cleanupCall();
-  currentCall = call;
-  call.answer(myStream);
-  call.on('stream', remoteStream => {
-    partnerVideo.srcObject = remoteStream;
-    setStatus('Connected!');
-  });
-  call.on('close', () => {
-    cleanupCall();
-    if (searching) startRandomChat();
-  });
-});
-
-// --- Cleanups ---
-function cleanupCall() {
-  if (currentCall) {
-    currentCall.close();
-    currentCall = null;
-  }
-  partnerVideo.srcObject = null;
-}
-
-function cleanupWaiting() {
-  if (myWaitingRef) {
-    myWaitingRef.remove();
-    myWaitingRef = null;
-  }
-  if (pairListener) {
-    pairRef.off('child_added', pairListener);
-    pairListener = null;
-  }
-
-  // Remove any pairs with this peer ID
-  pairRef.once('value').then(snapshot => {
-    snapshot.forEach(child => {
-      const data = child.val();
-      if (data.user1 === peer.id || data.user2 === peer.id) {
-        child.ref.remove();
-      }
-    });
-  });
-}
-
-// --- Random chat ---
-function startRandomChat() {
-  if (!myStream || !searching) return;
-  setStatus('Searching for a partner...');
-  cleanupWaiting();
-
-  myWaitingRef = waitingRef.push(peer.id);
-
-  waitingRef.once('value').then(snapshot => {
-    if (!searching) return;
-    const waitingData = snapshot.val() || {};
-    const waitingIds = Object.values(waitingData).filter(id => id !== peer.id);
-
-    if (waitingIds.length > 0) {
-      const partnerId = waitingIds[Math.floor(Math.random() * waitingIds.length)];
-      Object.entries(waitingData).forEach(([key, id]) => {
-        if (id === peer.id || id === partnerId) waitingRef.child(key).remove();
-      });
-
-      const roomId = peer.id + '_' + partnerId;
-      pairRef.child(roomId).set({ user1: peer.id, user2: partnerId });
-
-      cleanupCall();
-      currentCall = peer.call(partnerId, myStream);
-      currentCall.on('stream', remoteStream => {
-        partnerVideo.srcObject = remoteStream;
-        setStatus('Connected!');
-      });
-      currentCall.on('close', () => {
-        cleanupCall();
-        if (searching) startRandomChat();
-      });
-
-    } else {
-      pairListener = pairRef.on('child_added', snapshot => {
-        const data = snapshot.val();
-        if (data.user2 === peer.id && !currentCall && searching) {
-          cleanupCall();
-          currentCall = peer.call(data.user1, myStream);
-          currentCall.on('stream', remoteStream => {
-            partnerVideo.srcObject = remoteStream;
-            setStatus('Connected!');
-          });
-          currentCall.on('close', () => {
-            cleanupCall();
-            if (searching) startRandomChat();
-          });
-        }
-      });
-    }
-  });
-}
-
-// --- Buttons ---
-document.getElementById('skipBtn').onclick = () => {
-  cleanupCall();
-  cleanupWaiting(); // 🔥 remove user from database
-  if (searching) startRandomChat();
-};
-
-document.getElementById('toggleSearchBtn').onclick = () => {
-  searching = !searching;
-  const btn = document.getElementById('toggleSearchBtn');
-  btn.textContent = searching ? 'Stop Searching' : 'Start Searching';
-  if (searching) startRandomChat();
-  else {
-    setStatus('Searching paused');
-    cleanupWaiting(); // 🔥 cleanup database entries
-    cleanupCall();
-  }
-};
-
-document.getElementById('startRandom').onclick = () => {
-  searching = true;
-  document.getElementById('toggleSearchBtn').textContent = 'Stop Searching';
-  startRandomChat();
-};
-
-// --- Remove from database when tab closes ---
-window.addEventListener('beforeunload', () => {
-  cleanupWaiting();
-});
-
-// === Devices, mute, and camera code remain unchanged below ===
-
-// Devices
-const cameraSelect = document.getElementById("cameraSelect");
-const micSelect = document.getElementById("micSelect");
-
+// --- Media ---
 async function getDevices() {
   const devices = await navigator.mediaDevices.enumerateDevices();
   const videoDevices = devices.filter(d => d.kind === "videoinput");
   const audioDevices = devices.filter(d => d.kind === "audioinput");
 
-  cameraSelect.innerHTML = "";
-  videoDevices.forEach((device, index) => {
-    const option = document.createElement("option");
-    option.value = device.deviceId;
-    option.text = device.label || `Camera ${index + 1}`;
-    cameraSelect.appendChild(option);
-  });
+  const cameraSelect = document.getElementById("cameraSelect");
+  const micSelect = document.getElementById("micSelect");
 
+  cameraSelect.innerHTML = "";
+  videoDevices.forEach((d, i) => { let opt = document.createElement("option"); opt.value=d.deviceId; opt.text=d.label||`Camera ${i+1}`; cameraSelect.appendChild(opt); });
   micSelect.innerHTML = "";
-  audioDevices.forEach((device, index) => {
-    const option = document.createElement("option");
-    option.value = device.deviceId;
-    option.text = device.label || `Microphone ${index + 1}`;
-    micSelect.appendChild(option);
-  });
+  audioDevices.forEach((d, i) => { let opt = document.createElement("option"); opt.value=d.deviceId; opt.text=d.label||`Microphone ${i+1}`; micSelect.appendChild(opt); });
 }
 
 async function startMedia(cameraId, micId) {
-  if (myStream) myStream.getTracks().forEach(track => track.stop());
-
+  if (myStream) myStream.getTracks().forEach(t => t.stop());
   myStream = await navigator.mediaDevices.getUserMedia({
     video: cameraId ? { deviceId: { exact: cameraId } } : true,
     audio: micId ? { deviceId: { exact: micId } } : true
   });
   myVideo.srcObject = myStream;
-
-  if (currentCall) {
+  if (pc) {
     myStream.getTracks().forEach(track => {
-      const sender = currentCall.peerConnection.getSenders().find(s => s.track && s.track.kind === track.kind);
+      const sender = pc.getSenders().find(s => s.track && s.track.kind === track.kind);
       if (sender) sender.replaceTrack(track);
     });
   }
 }
 
-cameraSelect.addEventListener("change", () => startMedia(cameraSelect.value, micSelect.value));
-micSelect.addEventListener("change", () => startMedia(cameraSelect.value, micSelect.value));
-getDevices().then(() => {
-  if (cameraSelect.options.length > 0 || micSelect.options.length > 0) {
-    startMedia(cameraSelect.value, micSelect.value);
-  }
-});
+document.getElementById("cameraSelect").addEventListener("change", () => startMedia(cameraSelect.value, micSelect.value));
+document.getElementById("micSelect").addEventListener("change", () => startMedia(cameraSelect.value, micSelect.value));
+getDevices().then(() => { startMedia(cameraSelect.value, micSelect.value); });
 
-// Mute & camera toggle
-const muteBtn = document.getElementById("muteBtn");
-const cameraBtn = document.getElementById("cameraBtn");
-let micMuted = false;
-let camPaused = false;
-
-muteBtn.addEventListener("click", () => {
-  if (!myStream) return;
+// --- Mute & Camera toggle ---
+let micMuted=false, camPaused=false;
+document.getElementById("muteBtn").onclick = () => {
+  if(!myStream) return;
   micMuted = !micMuted;
-  myStream.getAudioTracks().forEach(track => (track.enabled = !micMuted));
-  muteBtn.textContent = micMuted ? "🔈 Unmute" : "🔇 Mute";
-});
-
-cameraBtn.addEventListener("click", () => {
-  if (!myStream) return;
+  myStream.getAudioTracks().forEach(t=>t.enabled=!micMuted);
+  document.getElementById("muteBtn").textContent = micMuted?"🔈 Unmute":"🔇 Mute";
+};
+document.getElementById("cameraBtn").onclick = () => {
+  if(!myStream) return;
   camPaused = !camPaused;
-  myStream.getVideoTracks().forEach(track => (track.enabled = !camPaused));
-  cameraBtn.textContent = camPaused ? "📷 Resume Camera" : "📷 Pause Camera";
-});
+  myStream.getVideoTracks().forEach(t=>t.enabled=!camPaused);
+  document.getElementById("cameraBtn").textContent = camPaused?"📷 Resume Camera":"📷 Pause Camera";
+};
 
-// Call bar toggle
-const callBar = document.getElementById('callBar');
-const toggleArrow = document.getElementById('toggleArrow');
+// --- Call bar toggle ---
+const callBar=document.getElementById('callBar');
+const toggleArrow=document.getElementById('toggleArrow');
 let hideTimeout;
-
-function showCallBar() {
-  callBar.classList.remove('hidden');
-  clearTimeout(hideTimeout);
-  hideTimeout = setTimeout(() => {
-    callBar.classList.add('hidden');
-  }, 3000);
-}
+function showCallBar(){ callBar.classList.remove('hidden'); clearTimeout(hideTimeout); hideTimeout=setTimeout(()=>callBar.classList.add('hidden'),3000);}
 document.addEventListener('mousemove', showCallBar);
 document.addEventListener('touchstart', showCallBar);
-
-toggleArrow.addEventListener("click", () => {
-  const isHidden = callBar.classList.contains("hidden");
-  if (isHidden) {
-    callBar.classList.remove("hidden");
-    toggleArrow.textContent = "▼";
-  } else {
-    callBar.classList.add("hidden");
-    toggleArrow.textContent = "▲";
-  }
+toggleArrow.addEventListener("click",()=>{
+  if(callBar.classList.contains("hidden")){ callBar.classList.remove("hidden"); toggleArrow.textContent="▼"; }
+  else{ callBar.classList.add("hidden"); toggleArrow.textContent="▲"; }
 });
-
 callBar.classList.add('hidden');
+
+// --- WebRTC + Firebase signaling ---
+async function createPeerConnection() {
+  pc = new RTCPeerConnection({ iceServers:[{urls:'stun:stun.l.google.com:19302'}] });
+  pc.ontrack = e => partnerVideo.srcObject = e.streams[0];
+  myStream.getTracks().forEach(track=>pc.addTrack(track,myStream));
+  pc.onicecandidate = e => {
+    if(e.candidate && currentRoomRef) currentRoomRef.child('candidates/'+localId).push(JSON.stringify(e.candidate));
+  };
+}
+
+async function startRandomChat() {
+  if(!myStream || searching) return;
+  searching=true;
+  setStatus('Searching for a partner...');
+  // Cleanup previous
+  if(currentRoomRef){ currentRoomRef.remove(); currentRoomRef=null; }
+  pc && pc.close();
+  await createPeerConnection();
+
+  const waitingRef = db.ref('sermovideo_waiting');
+  const roomRef = db.ref('sermovideo_pairs');
+  // Push self to waiting
+  const myWaitingRef = waitingRef.push({id: localId});
+  myWaitingRef.onDisconnect().remove();
+
+  waitingRef.once('value').then(snapshot=>{
+    const waitingData = snapshot.val()||{};
+    const otherIds = Object.entries(waitingData).filter(([key,data])=>data.id!==localId);
+    if(otherIds.length>0){
+      const [otherKey,otherData] = otherIds[Math.floor(Math.random()*otherIds.length)];
+      myWaitingRef.remove(); waitingRef.child(otherKey).remove();
+      const roomKey = roomRef.push({user1:localId,user2:otherData.id}).key;
+      currentRoomRef = roomRef.child(roomKey);
+      setupRoom(currentRoomRef, true);
+    } else {
+      myWaitingRef.on('value', snap=>{
+        if(!currentRoomRef){ /* still waiting */ }
+      });
+    }
+  });
+}
+
+async function setupRoom(roomRef, isOfferer){
+  roomRef.onDisconnect().remove();
+  currentRoomRef=roomRef;
+
+  if(isOfferer){
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    await roomRef.child('offer').set(JSON.stringify(offer));
+  } else {
+    roomRef.child('offer').on('value', async snap=>{
+      const offer = JSON.parse(snap.val());
+      await pc.setRemoteDescription(offer);
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      await roomRef.child('answer').set(JSON.stringify(answer));
+    });
+  }
+
+  roomRef.child('answer').on('value', async snap=>{
+    if(snap.exists() && isOfferer){
+      const answer = JSON.parse(snap.val());
+      await pc.setRemoteDescription(answer);
+      setStatus('Connected!');
+    }
+  });
+
+  roomRef.child('candidates').on('child_added', snap=>{
+    snap.forEach(c=>pc.addIceCandidate(JSON.parse(c.val())));
+  });
+}
+
+// --- Buttons ---
+document.getElementById('startRandom').onclick = ()=>startRandomChat();
+document.getElementById('skipBtn').onclick = ()=>{
+  searching=false;
+  pc && pc.close(); partnerVideo.srcObject=null;
+  if(currentRoomRef){ currentRoomRef.remove(); currentRoomRef=null; }
+  startRandomChat();
+};
+document.getElementById('toggleSearchBtn').onclick=()=>{
+  searching=!searching;
+  const btn=document.getElementById('toggleSearchBtn');
+  btn.textContent=searching?"Stop Searching":"Start Searching";
+  if(searching) startRandomChat();
+  else { pc && pc.close(); partnerVideo.srcObject=null; if(currentRoomRef){ currentRoomRef.remove(); currentRoomRef=null; } setStatus('Searching paused'); }
+};
+
+window.addEventListener('beforeunload',()=>{
+  if(currentRoomRef) currentRoomRef.remove();
+});
 </script>
 </body>
 </html>
