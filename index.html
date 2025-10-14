@@ -51,11 +51,34 @@
     background: #222;
     border: 1px solid #333;
   }
+    
+ .header {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  right: 20px;
+  display: flex;
+  justify-content: space-between; /* logo left, button right */
+  align-items: center;
+}
+
+.logo {
+  height: 200px;
+  transition: 0.3s;
+}
+
+.logo:hover {
+  transform: scale(1.05);
+}
+
+
 </style>
 </head>
 <body>
+ <div class="header">
+  <img src="logo2.png" alt="SermoVideo" class="logo">
   <button id="authBtn">Sign In</button>
-  <h1>SermoVideo</h1>
+</div>
   <p>Connect instantly with private or random video calls.</p>
   <p>random calling is currently unavailable</p> 
   <div>
