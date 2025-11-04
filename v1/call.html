@@ -11,9 +11,24 @@ body {
   height:100vh; margin:0;
 }
 h2 { color:#00bfff; margin-bottom:10px; }
+.video-container {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 20px;
+  width: 100%;
+  max-width: 1200px;
+}
 video {
-  width:45%; border-radius:12px; margin:10px;
-  background:#000; box-shadow:0 0 15px #00bfff33;
+  width:45%; 
+  min-width: 300px;
+  border-radius:12px; 
+  background:#000; 
+  box-shadow:0 0 15px #00bfff33;
+  transform: scaleX(-1); /* Mirror for self-view */
+}
+.remote-video {
+  transform: scaleX(1); /* Don't mirror remote video */
 }
 div.controls {
   display:flex; gap:10px; margin-top:15px;
@@ -21,21 +36,32 @@ div.controls {
 button {
   background:#00bfff; border:none; padding:10px 15px;
   border-radius:8px; color:#fff; font-weight:bold; cursor:pointer;
+  transition: background 0.3s;
 }
 button:hover { background:#0099cc; }
+button:disabled {
+  background:#666;
+  cursor: not-allowed;
+}
+.status {
+  margin: 10px 0;
+  color: #00bfff;
+}
 </style>
-<!-- ✅ Use Firebase v8 scripts -->
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
 </head>
 <body>
-  <h2>Private Room</h2>
-  <video id="localVideo" autoplay playsinline muted></video>
-  <video id="remoteVideo" autoplay playsinline></video>
+  <h2>Private Video Call</h2>
+  <div class="status" id="status">Join or create a call</div>
+  <div class="video-container">
+    <video id="localVideo" autoplay playsinline muted></video>
+    <video id="remoteVideo" autoplay playsinline class="remote-video"></video>
+  </div>
   <div class="controls">
     <button id="startBtn">Start Camera</button>
-    <button id="callBtn">Call</button>
-    <button id="hangupBtn">Hang Up</button>
+    <button id="callBtn" disabled>Create Call</button>
+    <button id="hangupBtn" disabled>Hang Up</button>
   </div>
 
 <script>
@@ -49,87 +75,304 @@ const firebaseConfig = {
    appId: "1:799514081881:web:47990bdfef2c5460030f48",
    measurementId: "G-9HLVQ3B1QD"
 };
+
+// Initialize Firebase
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
-const configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
-let peerConnection, localStream, remoteStream;
-const roomId = new URLSearchParams(window.location.search).get("room");
+// WebRTC configuration
+const configuration = { 
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' }
+  ] 
+};
+
+// Global variables
+let peerConnection = null;
+let localStream = null;
+let remoteStream = null;
+let isCaller = false;
+let roomId = null;
+
+// Get room ID from URL or generate one
+const urlParams = new URLSearchParams(window.location.search);
+roomId = urlParams.get("room") || generateRoomId();
+if (!urlParams.get("room")) {
+  // If no room in URL, we're the caller
+  isCaller = true;
+  window.history.replaceState({}, '', `?room=${roomId}`);
+}
+
 const roomRef = db.collection("rooms").doc(roomId);
 
+// DOM elements
 const localVideo = document.getElementById('localVideo');
 const remoteVideo = document.getElementById('remoteVideo');
+const startBtn = document.getElementById('startBtn');
+const callBtn = document.getElementById('callBtn');
+const hangupBtn = document.getElementById('hangupBtn');
+const status = document.getElementById('status');
 
-document.getElementById('startBtn').onclick = async () => {
-  localStream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true });
-  localVideo.srcObject = localStream;
-};
+// Generate random room ID
+function generateRoomId() {
+  return Math.random().toString(36).substring(2, 10);
+}
 
-document.getElementById('callBtn').onclick = async () => {
-  peerConnection = new RTCPeerConnection(configuration);
-  remoteStream = new MediaStream();
-  remoteVideo.srcObject = remoteStream;
+// Update status message
+function updateStatus(message) {
+  status.textContent = message;
+  console.log(message);
+}
 
-  localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-  peerConnection.ontrack = e => e.streams[0].getTracks().forEach(t => remoteStream.addTrack(t));
-
-  const callerCandidates = roomRef.collection('callerCandidates');
-  peerConnection.onicecandidate = e => e.candidate && callerCandidates.add(e.candidate.toJSON());
-
-  const offer = await peerConnection.createOffer();
-  await peerConnection.setLocalDescription(offer);
-  await roomRef.set({ offer });
-
-  roomRef.onSnapshot(async snapshot => {
-    const data = snapshot.data();
-    if (!peerConnection.currentRemoteDescription && data?.answer) {
-      const answerDesc = new RTCSessionDescription(data.answer);
-      await peerConnection.setRemoteDescription(answerDesc);
-    }
-  });
-
-  roomRef.collection('calleeCandidates').onSnapshot(snapshot => {
-    snapshot.docChanges().forEach(change => {
-      if (change.type === 'added') peerConnection.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+// Start camera function
+startBtn.onclick = async () => {
+  try {
+    updateStatus("Accessing camera and microphone...");
+    localStream = await navigator.mediaDevices.getUserMedia({ 
+      video: {
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      }, 
+      audio: true 
     });
-  });
-};
-
-document.getElementById('hangupBtn').onclick = async () => {
-  if (peerConnection) peerConnection.close();
-  localStream.getTracks().forEach(t => t.stop());
-  window.location.href = "private.html";
-};
-
-// --- If joining existing room ---
-(async () => {
-  const roomSnapshot = await roomRef.get();
-  if (roomSnapshot.exists && !roomSnapshot.data().answer) {
-    peerConnection = new RTCPeerConnection(configuration);
-    remoteStream = new MediaStream();
-    remoteVideo.srcObject = remoteStream;
-
-    localStream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true });
+    
     localVideo.srcObject = localStream;
-    localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+    updateStatus("Camera started! You can now create or join a call.");
+    
+    // Enable call button
+    callBtn.disabled = false;
+    startBtn.disabled = true;
+    
+    // If joining existing room, automatically try to answer
+    if (!isCaller) {
+      checkForOffer();
+    }
+    
+  } catch (error) {
+    console.error("Error accessing media devices:", error);
+    updateStatus("Error: Could not access camera/microphone");
+    alert("Could not access camera and microphone. Please check permissions.");
+  }
+};
 
-    const calleeCandidates = roomRef.collection('calleeCandidates');
-    peerConnection.onicecandidate = e => e.candidate && calleeCandidates.add(e.candidate.toJSON());
-    peerConnection.ontrack = e => e.streams[0].getTracks().forEach(t => remoteStream.addTrack(t));
-
-    const offer = roomSnapshot.data().offer;
-    await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-    const answer = await peerConnection.createAnswer();
-    await peerConnection.setLocalDescription(answer);
-    await roomRef.update({ answer });
-
-    roomRef.collection('callerCandidates').onSnapshot(snapshot => {
-      snapshot.docChanges().forEach(change => {
-        if (change.type === 'added') peerConnection.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+// Create call function
+callBtn.onclick = async () => {
+  if (!localStream) {
+    alert("Please start your camera first!");
+    return;
+  }
+  
+  try {
+    updateStatus("Creating call...");
+    callBtn.disabled = true;
+    hangupBtn.disabled = false;
+    
+    // Create peer connection
+    peerConnection = new RTCPeerConnection(configuration);
+    
+    // Add local tracks
+    localStream.getTracks().forEach(track => {
+      peerConnection.addTrack(track, localStream);
+    });
+    
+    // Handle incoming remote stream
+    peerConnection.ontrack = (event) => {
+      console.log("Received remote stream");
+      remoteStream = event.streams[0];
+      remoteVideo.srcObject = remoteStream;
+      updateStatus("Connected! Call is active.");
+    };
+    
+    // Handle ICE candidates
+    const callerCandidates = roomRef.collection('callerCandidates');
+    peerConnection.onicecandidate = (event) => {
+      if (event.candidate) {
+        callerCandidates.add(event.candidate.toJSON());
+      }
+    };
+    
+    // Create and set local offer
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+    
+    // Save offer to Firestore
+    await roomRef.set({
+      offer: {
+        type: offer.type,
+        sdp: offer.sdp
+      },
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    
+    updateStatus("Call created! Waiting for someone to join...");
+    updateStatus("Share this room ID: " + roomId);
+    
+    // Listen for answer
+    roomRef.onSnapshot(async (snapshot) => {
+      const data = snapshot.data();
+      if (!data || !data.answer) return;
+      
+      if (peerConnection.signalingState !== 'stable') {
+        const answerDesc = new RTCSessionDescription(data.answer);
+        await peerConnection.setRemoteDescription(answerDesc);
+        updateStatus("Call connected!");
+      }
+    });
+    
+    // Listen for callee ICE candidates
+    roomRef.collection('calleeCandidates').onSnapshot((snapshot) => {
+      snapshot.docChanges().forEach(async (change) => {
+        if (change.type === 'added') {
+          const candidate = new RTCIceCandidate(change.doc.data());
+          await peerConnection.addIceCandidate(candidate);
+        }
       });
     });
+    
+  } catch (error) {
+    console.error("Error creating call:", error);
+    updateStatus("Error creating call");
+    callBtn.disabled = false;
   }
-})();
+};
+
+// Check for existing offer (for callee)
+async function checkForOffer() {
+  try {
+    const roomSnapshot = await roomRef.get();
+    if (roomSnapshot.exists && roomSnapshot.data().offer && localStream) {
+      updateStatus("Found existing call. Answering...");
+      await answerCall(roomSnapshot.data());
+    }
+  } catch (error) {
+    console.error("Error checking for offer:", error);
+  }
+}
+
+// Answer call function
+async function answerCall(roomData) {
+  if (!localStream) {
+    alert("Please start your camera first!");
+    return;
+  }
+  
+  try {
+    updateStatus("Answering call...");
+    callBtn.disabled = true;
+    hangupBtn.disabled = false;
+    
+    // Create peer connection
+    peerConnection = new RTCPeerConnection(configuration);
+    
+    // Add local tracks
+    localStream.getTracks().forEach(track => {
+      peerConnection.addTrack(track, localStream);
+    });
+    
+    // Handle incoming remote stream
+    peerConnection.ontrack = (event) => {
+      console.log("Received remote stream");
+      remoteStream = event.streams[0];
+      remoteVideo.srcObject = remoteStream;
+      updateStatus("Connected! Call is active.");
+    };
+    
+    // Handle ICE candidates
+    const calleeCandidates = roomRef.collection('calleeCandidates');
+    peerConnection.onicecandidate = (event) => {
+      if (event.candidate) {
+        calleeCandidates.add(event.candidate.toJSON());
+      }
+    };
+    
+    // Set remote offer
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(roomData.offer));
+    
+    // Create and set local answer
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+    
+    // Save answer to Firestore
+    await roomRef.update({
+      answer: {
+        type: answer.type,
+        sdp: answer.sdp
+      }
+    });
+    
+    updateStatus("Call answered! Connecting...");
+    
+    // Listen for caller ICE candidates
+    roomRef.collection('callerCandidates').onSnapshot((snapshot) => {
+      snapshot.docChanges().forEach(async (change) => {
+        if (change.type === 'added') {
+          const candidate = new RTCIceCandidate(change.doc.data());
+          await peerConnection.addIceCandidate(candidate);
+        }
+      });
+    });
+    
+  } catch (error) {
+    console.error("Error answering call:", error);
+    updateStatus("Error answering call");
+    callBtn.disabled = false;
+  }
+}
+
+// Hang up function
+hangupBtn.onclick = async () => {
+  updateStatus("Hanging up...");
+  
+  // Close peer connection
+  if (peerConnection) {
+    peerConnection.close();
+    peerConnection = null;
+  }
+  
+  // Stop local stream
+  if (localStream) {
+    localStream.getTracks().forEach(track => track.stop());
+    localStream = null;
+  }
+  
+  // Clear video elements
+  localVideo.srcObject = null;
+  remoteVideo.srcObject = null;
+  
+  // Clean up Firestore (optional - you might want to keep for history)
+  try {
+    await roomRef.delete();
+  } catch (error) {
+    console.log("Room already cleaned up");
+  }
+  
+  // Reset UI
+  callBtn.disabled = true;
+  hangupBtn.disabled = true;
+  startBtn.disabled = false;
+  
+  updateStatus("Call ended. Start camera to begin again.");
+  
+  // Redirect or stay on page
+  // window.location.href = "private.html";
+};
+
+// Clean up on page unload
+window.addEventListener('beforeunload', () => {
+  if (peerConnection) {
+    peerConnection.close();
+  }
+  if (localStream) {
+    localStream.getTracks().forEach(track => track.stop());
+  }
+});
+
+// Initialize
+updateStatus(`Room ID: ${roomId} - ${isCaller ? 'Create a call' : 'Join existing call'}`);
+if (!isCaller) {
+  updateStatus("Waiting for call... Start camera to be ready.");
+}
 </script>
 </body>
 </html>
